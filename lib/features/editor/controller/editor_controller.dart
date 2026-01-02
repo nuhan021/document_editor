@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -32,10 +33,11 @@ class EditorController extends GetxController {
   var boxX = 0.0.obs;
   var boxY = 0.0.obs;
 
+  var currentPageIndex = 0.obs;
+
   var textDraggableFields = <Map<String, dynamic>>[].obs;
 
   late PdfDocumentLoadedDetails outerDetails;
-
 
   @override
   void onInit() {
@@ -44,16 +46,92 @@ class EditorController extends GetxController {
   }
 
   void addTextBox() {
+    bool hasEmptyTextField = textDraggableFields.any(
+      (field) =>
+          field['type'] == 'text' &&
+          field['text'] == 'text' &&
+          field['isVisible'] == true &&
+          field['pageIndex'] == currentPageIndex.value,
+    );
+
+    if (hasEmptyTextField) {
+      Get.snackbar(
+        "Warning",
+        "Please edit the existing text box on this page.",
+      );
+      return;
+    }
+
     textDraggableFields.add({
       'id': const Uuid().v4(),
-      'text': 'Nuhan',
+      'text': 'text',
       'x': 50.0,
       'y': 50.0,
+      'isVisible': true,
+      'type': 'text',
+      'pageIndex': currentPageIndex.value,
     });
+  }
+
+  void addDateBox() {
+    textDraggableFields.add({
+      'id': const Uuid().v4(),
+      'text':
+          "${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}",
+      'x': 100.0,
+      'y': 100.0,
+      'isVisible': true,
+      'type': 'date',
+      'pageIndex': currentPageIndex.value,
+    });
+  }
+
+  void addSignatureBox() {
+    textDraggableFields.add({
+      'id': const Uuid().v4(),
+      'text': 'Tap to Sign',
+      'signature': '', // শুরুতে খালি স্ট্রিং
+      'x': 100.0,
+      'y': 150.0,
+      'isVisible': true,
+      'type': 'signature',
+      'pageIndex': currentPageIndex.value,
+    });
+  }
+
+  void updateSignatureImage(int index, Uint8List bytes) {
+    textDraggableFields[index]['signature'] = base64Encode(bytes);
+    textDraggableFields[index]['text'] = '';
+    textDraggableFields.refresh();
+  }
+
+  String exportFieldsToJson() {
+    if (textDraggableFields.isEmpty) {
+      Get.snackbar(
+        "Empty",
+        "Please add text, date or signature box first.",
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+      return "[]";
+    }
+    List<Map<String, dynamic>> exportData = textDraggableFields.map((field) {
+      var fieldCopy = Map<String, dynamic>.from(field);
+      fieldCopy['isVisible'] = true;
+      return fieldCopy;
+    }).toList();
+    String jsonString = jsonEncode(exportData);
+    return jsonString;
   }
 
   void updateFieldText(int index, String newText) {
     textDraggableFields[index]['text'] = newText;
+    textDraggableFields.refresh();
+  }
+
+  void hideField(int index) {
+    textDraggableFields[index]['isVisible'] = false;
     textDraggableFields.refresh();
   }
 
@@ -100,29 +178,72 @@ class EditorController extends GetxController {
     AppLoggerHelper.info("PDF Aspect Ratio: ${pdfAspectRatio.value}");
   }
 
-  void docChange(PdfDocumentLoadedDetails details, double screenX, double screenY, String text) async {
+  void acceptChange() async {
+    final emptyField = textDraggableFields.firstWhereOrNull(
+      (field) =>
+          field['type'] == 'text' &&
+          field['text'] == 'text' &&
+          field['isVisible'] == true,
+    );
 
+    if (emptyField != null) {
+      int pageNum = (emptyField['pageIndex'] ?? 0) + 1;
+
+      Get.snackbar(
+        "Warning",
+        "Please edit the existing text box on Page $pageNum",
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: Colors.orange.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+      return;
+    }
+    for (var field in textDraggableFields) {
+      field['isVisible'] = false;
+    }
+    textDraggableFields.refresh();
+    docChange();
+
+    AppLoggerHelper.info("All changes accepted and fields hidden.");
+  }
+
+  void docChange() async {
     double containerWidth = Get.width;
     double containerHeight = pdfPageHeight.value * 0.67;
 
     double scaleX = pdfPageWidth.value / containerWidth;
     double scaleY = pdfPageHeight.value / containerHeight;
 
-    double finalPdfX = screenX * scaleX;
-    double finalPdfY = screenY * scaleY;
-
-    AppLoggerHelper.info("Converting Screen ($screenX, $screenY) to PDF ($finalPdfX, $finalPdfY)");
-
     final Uint8List docBytes = await File(filePath).readAsBytes();
     final PdfDocument document = PdfDocument(inputBytes: docBytes);
 
-    document.pages[0].graphics.drawString(
-      text,
-      PdfStandardFont(PdfFontFamily.helvetica, 20),
-      brush: PdfSolidBrush(PdfColor(255, 0, 0)),
-      bounds: Rect.fromLTWH(finalPdfX, finalPdfY, 150, 40),
-    );
+    for (var field in textDraggableFields) {
+      if (field['isVisible'] == false) {
+        double finalPdfX = field['x'] * scaleX;
+        double finalPdfY = field['y'] * scaleY;
+        int pageIdx = field['pageIndex'] ?? 0;
 
+        if (field['type'] == 'signature' && field['signature'] != null && field['signature'].toString().isNotEmpty) {
+          // ১. স্ট্রিং ডাটাকে বাইটসে (List<int>) রূপান্তর করা
+          final Uint8List signatureBytes = base64Decode(field['signature'].toString());
+
+          // ২. ডিকোড করা বাইটস দিয়ে PdfBitmap তৈরি করা
+          document.pages[pageIdx].graphics.drawImage(
+            PdfBitmap(signatureBytes),
+            Rect.fromLTWH(finalPdfX + 10, finalPdfY + 20, 100, 50),
+          );
+        } else {
+          document.pages[pageIdx].graphics.drawString(
+            field['text'],
+            PdfStandardFont(PdfFontFamily.helvetica, 14),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: Rect.fromLTWH(finalPdfX + 10, finalPdfY + 20, 200, 50),
+          );
+        }
+      }
+    }
+
+    // ৩. সেভ করা
     final List<int> bytes = await document.save();
     document.dispose();
 
@@ -133,7 +254,6 @@ class EditorController extends GetxController {
     currentFilePath.value = newFile.path;
     documentVersion.value++;
   }
-
 
   @override
   void onClose() {
