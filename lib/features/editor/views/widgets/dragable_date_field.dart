@@ -18,7 +18,6 @@ class DragableDateField extends StatelessWidget {
     this.onSubmit,
   });
 
-
   Future<void> _selectDate(BuildContext context) async {
     DateTime? picked = await showDatePicker(
       context: context,
@@ -28,7 +27,6 @@ class DragableDateField extends StatelessWidget {
     );
 
     if (picked != null) {
-
       String formattedDate = "${picked.day}/${picked.month}/${picked.year}";
       onDateUpdate(index, formattedDate);
     }
@@ -40,36 +38,47 @@ class DragableDateField extends StatelessWidget {
       left: field['x'],
       top: field['y'],
       child: GestureDetector(
-        onPanUpdate: (details) => onDrag(index, details.delta.dx, details.delta.dy),
+        onPanUpdate: (details) =>
+            onDrag(index, details.delta.dx, details.delta.dy),
         onTap: () => _selectDate(context),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // মেইন কন্টেইনার (তারিখ দেখানোর জন্য)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border.all(color: Colors.orange, width: 1.5), // টেক্সট থেকে আলাদা করতে অরেঞ্জ বর্ডার
+                border: Border.all(color: Colors.orange, width: 1.5),
                 borderRadius: BorderRadius.circular(4),
                 boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
                 ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.calendar_today, size: 14, color: Colors.orange),
+                  const Icon(
+                    Icons.calendar_today,
+                    size: 14,
+                    color: Colors.orange,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     field['text'],
-                    style: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
             ),
 
-            // Delete Button
             Positioned(
               right: -10,
               top: -10,
@@ -77,13 +86,15 @@ class DragableDateField extends StatelessWidget {
                 onTap: onDelete,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.close, color: Colors.white, size: 14),
                 ),
               ),
             ),
 
-            // Submit Button
             Positioned(
               right: 15,
               top: -10,
@@ -91,7 +102,10 @@ class DragableDateField extends StatelessWidget {
                 onTap: onSubmit,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.check, color: Colors.white, size: 14),
                 ),
               ),
