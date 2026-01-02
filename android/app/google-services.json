@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "248987056792",
+    "project_id": "pdf-editor-e3a78",
+    "storage_bucket": "pdf-editor-e3a78.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:248987056792:android:08bcc7c26db7be8c6eeeed",
+        "android_client_info": {
+          "package_name": "com.example.pe"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDzSQ9Rd0sl6dRxbYfXQlp7jtF5_SpQ43g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
