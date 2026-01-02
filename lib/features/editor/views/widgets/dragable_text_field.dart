@@ -89,10 +89,10 @@ class DraggableTextField extends StatelessWidget {
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // কীবোর্ড আসলে যাতে উপরে ওঠে
+      isScrollControlled: true,
       builder: (context) => Padding(
         padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom, // কীবোর্ডের জন্য প্যাডিং
+          bottom: MediaQuery.of(context).viewInsets.bottom,
           left: 20, right: 20, top: 20,
         ),
         child: Column(
