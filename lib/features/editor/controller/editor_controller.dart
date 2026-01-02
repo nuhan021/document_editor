@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pe/core/utils/logging/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:signature/signature.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
@@ -23,21 +25,19 @@ class EditorController extends GetxController {
 
   var currentFilePath = ''.obs;
   var documentVersion = 0.obs;
-  var zoomLevel = 1.0.obs;
-  var scrollOffset = Offset.zero.obs;
-  var currentPageIndex = 0.obs;
-  double lastDetectedWidth = 411.42; // ডিফল্ট হিসেবে আপনার লগ থেকে পাওয়া মান
-  double lastDetectedHeight = 683.42;
-  // Screen viewport dimensions
-  double viewportWidth = 411.42;
-  double viewportHeight = 683.42;
 
-  // 🔥 NEW: Store actual PDF page dimensions
   var pdfPageWidth = 0.0.obs;
   var pdfPageHeight = 0.0.obs;
+  var pdfAspectRatio = 0.0.obs;
 
-  bool get hasFilledField => fields.any((f) => f.data != null || f.signatureBytes != null);
-  bool get canAddNewField => fields.isEmpty || fields.every((f) => f.data != null || f.signatureBytes != null);
+  var boxX = 0.0.obs;
+  var boxY = 0.0.obs;
+
+  var currentPageIndex = 0.obs;
+
+  var textDraggableFields = <Map<String, dynamic>>[].obs;
+
+  late PdfDocumentLoadedDetails outerDetails;
 
   @override
   void onInit() {
@@ -45,189 +45,214 @@ class EditorController extends GetxController {
     currentFilePath.value = filePath;
   }
 
-  void onDocumentLoaded(PdfDocumentLoadedDetails details) {
-    final page = details.document.pages[0];
+  void addTextBox() {
+    bool hasEmptyTextField = textDraggableFields.any(
+      (field) =>
+          field['type'] == 'text' &&
+          field['text'] == 'text' &&
+          field['isVisible'] == true &&
+          field['pageIndex'] == currentPageIndex.value,
+    );
 
-    // PDF Points (আপনার লগে যা আসছে: ৬১২ x ৭৯২)
-    double ptWidth = page.size.width;
-    double ptHeight = page.size.height;
-
-    // পিক্সেল ক্যালকুলেশন (৯৬ DPI স্ট্যান্ডার্ড ধরে)
-    double dpi = 96.0;
-    double pixelWidth = (ptWidth / 72) * dpi;
-    double pixelHeight = (ptHeight / 72) * dpi;
-
-    pdfPageWidth.value = ptWidth;
-    pdfPageHeight.value = ptHeight;
-
-    print('📄 PDF Size (Points): $ptWidth x $ptHeight');
-    print('🖼️ PDF Size (Pixels at 96 DPI): ${pixelWidth.round()} x ${pixelHeight.round()}');
-    print('📱 Viewport Size: $viewportWidth x $viewportHeight');
-  }
-
-
-
-  void addField(String type) {
-    if (!canAddNewField) {
+    if (hasEmptyTextField) {
       Get.snackbar(
-        "Action Required",
-        "Please fill the current field first.",
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.orange,
-        colorText: Colors.white,
+        "Warning",
+        "Please edit the existing text box on this page.",
       );
       return;
     }
 
-    // গুরুত্বপূর্ণ: বর্তমান যে পেজটি স্ক্রিনে আছে তার ইনডেক্স সেভ করা
-    int currentActivePage = pdfViewerController.pageNumber - 1;
-
-    fields.add(DraggableField(
-      id: const Uuid().v4(),
-      type: type,
-      pageIndex: currentActivePage, // এটি নিশ্চিত করে ডাটা সঠিক পাতায় বসবে
-      dx: 100.0,
-      dy: 100.0,
-    ));
+    textDraggableFields.add({
+      'id': const Uuid().v4(),
+      'text': 'text',
+      'x': 50.0,
+      'y': 50.0,
+      'isVisible': true,
+      'type': 'text',
+      'pageIndex': currentPageIndex.value,
+    });
   }
 
-  void updateZoom(double newZoom) => zoomLevel.value = newZoom;
-  void updateScroll(Offset offset) => scrollOffset.value = offset;
-
-  void updatePosition(String id, double newDx, double newDy) {
-    int index = fields.indexWhere((f) => f.id == id);
-    if (index != -1) {
-      fields[index].dx = newDx;
-      fields[index].dy = newDy;
-      fields.refresh();
-    }
+  void addDateBox() {
+    textDraggableFields.add({
+      'id': const Uuid().v4(),
+      'text':
+          "${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}",
+      'x': 100.0,
+      'y': 100.0,
+      'isVisible': true,
+      'type': 'date',
+      'pageIndex': currentPageIndex.value,
+    });
   }
 
-  void updateFieldData(String id, String data) {
-    int index = fields.indexWhere((f) => f.id == id);
-    if (index != -1) {
-      fields[index].data = data;
-      fields.refresh();
-    }
+  void addSignatureBox() {
+    textDraggableFields.add({
+      'id': const Uuid().v4(),
+      'text': 'Tap to Sign',
+      'signature': '', // শুরুতে খালি স্ট্রিং
+      'x': 100.0,
+      'y': 150.0,
+      'isVisible': true,
+      'type': 'signature',
+      'pageIndex': currentPageIndex.value,
+    });
   }
 
-  Future<void> saveSignature(String id) async {
-    if (sigController.isNotEmpty) {
-      final Uint8List? data = await sigController.toPngBytes();
-      int index = fields.indexWhere((f) => f.id == id);
-      if (index != -1 && data != null) {
-        fields[index].signatureBytes = data;
-        fields.refresh();
-        sigController.clear();
-      }
-    }
+  void updateSignatureImage(int index, Uint8List bytes) {
+    textDraggableFields[index]['signature'] = base64Encode(bytes);
+    textDraggableFields[index]['text'] = '';
+    textDraggableFields.refresh();
   }
 
-  void removeField(String id) {
-    fields.removeWhere((f) => f.id == id);
-  }
-
-  void updateLayoutConstraints(double w, double h) {
-    lastDetectedWidth = w;
-    lastDetectedHeight = h;
-  }
-
-  Future<void> applyFieldToDocument() async {
-    try {
-      Get.dialog(
-        const Center(child: CircularProgressIndicator()),
-        barrierDismissible: false,
+  String exportFieldsToJson() {
+    if (textDraggableFields.isEmpty) {
+      Get.snackbar(
+        "Empty",
+        "Please add text, date or signature box first.",
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
       );
+      return "[]";
+    }
+    List<Map<String, dynamic>> exportData = textDraggableFields.map((field) {
+      var fieldCopy = Map<String, dynamic>.from(field);
+      fieldCopy['isVisible'] = true;
+      return fieldCopy;
+    }).toList();
+    String jsonString = jsonEncode(exportData);
+    return jsonString;
+  }
 
-      final Uint8List docBytes = await File(currentFilePath.value).readAsBytes();
-      final PdfDocument document = PdfDocument(inputBytes: docBytes);
+  void updateFieldText(int index, String newText) {
+    textDraggableFields[index]['text'] = newText;
+    textDraggableFields.refresh();
+  }
 
-      for (var field in fields.where((f) => f.data != null || f.signatureBytes != null)) {
-        final PdfPage page = document.pages[field.pageIndex];
-        final PdfGraphics graphics = page.graphics;
+  void hideField(int index) {
+    textDraggableFields[index]['isVisible'] = false;
+    textDraggableFields.refresh();
+  }
 
+  void updateFieldPosition(int index, double dx, double dy) {
+    var field = textDraggableFields[index];
+    double newX = field['x'] + dx;
+    double newY = field['y'] + dy;
 
-        final pdfWidth = page.size.width;
-        final pdfHeight = page.size.height;
+    double containerWidth = Get.width;
+    double containerHeight = pdfPageHeight.value * 0.67;
 
-        final viewWidth = lastDetectedWidth;
-        final viewHeight = lastDetectedHeight;
+    textDraggableFields[index]['x'] = newX.clamp(0.0, containerWidth - 100);
+    textDraggableFields[index]['y'] = newY.clamp(0.0, containerHeight - 40);
 
-        final scaleX = pdfWidth / viewWidth;
-        final scaleY = pdfHeight / viewHeight;
+    textDraggableFields.refresh();
+  }
 
-        // সবচেয়ে গুরুত্বপূর্ণ লাইন ↓
-        double pdfX = field.dx * scaleX;
-        double pdfY = (viewHeight - field.dy) * scaleY;
+  void updateBoxPosition(double dx, double dy) {
+    const double boxSize = 40.0;
+    double containerWidth = Get.width;
+    double containerHeight = pdfPageHeight.value * 0.67;
 
-        if (field.type == 'signature' && field.signatureBytes != null) {
-          graphics.drawImage(
-            PdfBitmap(field.signatureBytes!),
-            Rect.fromLTWH(pdfX, pdfY, 100 * scaleX, 50 * scaleY),
+    double newX = boxX.value + dx;
+    double newY = boxY.value + dy;
+
+    boxX.value = newX.clamp(0.0, containerWidth - boxSize);
+    boxY.value = newY.clamp(0.0, containerHeight - boxSize);
+  }
+
+  void onDocumentLoaded(PdfDocumentLoadedDetails details) {
+    outerDetails = details;
+    final PdfPage page = details.document.pages[0];
+    double width = page.size.width;
+    double height = page.size.height;
+
+    pdfPageWidth.value = width;
+    pdfPageHeight.value = height;
+    if (height != 0) {
+      pdfAspectRatio.value = width / height;
+    }
+
+    AppLoggerHelper.info("PDF Original Width: $width");
+    AppLoggerHelper.info("PDF Original Height: $height");
+    AppLoggerHelper.info("PDF Aspect Ratio: ${pdfAspectRatio.value}");
+  }
+
+  void acceptChange() async {
+    final emptyField = textDraggableFields.firstWhereOrNull(
+      (field) =>
+          field['type'] == 'text' &&
+          field['text'] == 'text' &&
+          field['isVisible'] == true,
+    );
+
+    if (emptyField != null) {
+      int pageNum = (emptyField['pageIndex'] ?? 0) + 1;
+
+      Get.snackbar(
+        "Warning",
+        "Please edit the existing text box on Page $pageNum",
+        snackPosition: SnackPosition.TOP,
+        backgroundColor: Colors.orange.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+      return;
+    }
+    for (var field in textDraggableFields) {
+      field['isVisible'] = false;
+    }
+    textDraggableFields.refresh();
+    docChange();
+
+    AppLoggerHelper.info("All changes accepted and fields hidden.");
+  }
+
+  void docChange() async {
+    double containerWidth = Get.width;
+    double containerHeight = pdfPageHeight.value * 0.67;
+
+    double scaleX = pdfPageWidth.value / containerWidth;
+    double scaleY = pdfPageHeight.value / containerHeight;
+
+    final Uint8List docBytes = await File(filePath).readAsBytes();
+    final PdfDocument document = PdfDocument(inputBytes: docBytes);
+
+    for (var field in textDraggableFields) {
+      if (field['isVisible'] == false) {
+        double finalPdfX = field['x'] * scaleX;
+        double finalPdfY = field['y'] * scaleY;
+        int pageIdx = field['pageIndex'] ?? 0;
+
+        if (field['type'] == 'signature' && field['signature'] != null && field['signature'].toString().isNotEmpty) {
+          // ১. স্ট্রিং ডাটাকে বাইটসে (List<int>) রূপান্তর করা
+          final Uint8List signatureBytes = base64Decode(field['signature'].toString());
+
+          // ২. ডিকোড করা বাইটস দিয়ে PdfBitmap তৈরি করা
+          document.pages[pageIdx].graphics.drawImage(
+            PdfBitmap(signatureBytes),
+            Rect.fromLTWH(finalPdfX + 10, finalPdfY + 20, 100, 50),
           );
         } else {
-          graphics.drawString(
-            field.data!,
-            PdfStandardFont(PdfFontFamily.helvetica, 14 * scaleY), // ফন্ট সাইজও স্কেল করা ভালো
-            bounds: Rect.fromLTWH(pdfX, pdfY - 5 * scaleY, 220 * scaleX, 60 * scaleY),
+          document.pages[pageIdx].graphics.drawString(
+            field['text'],
+            PdfStandardFont(PdfFontFamily.helvetica, 14),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: Rect.fromLTWH(finalPdfX + 10, finalPdfY + 20, 200, 50),
           );
         }
       }
-
-      // ফাইল সেভ এবং রিফ্রেশ লজিক
-      final List<int> bytes = await document.save();
-      document.dispose();
-
-      final tempDir = await getTemporaryDirectory();
-      final newFile = File('${tempDir.path}/temp_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      await newFile.writeAsBytes(bytes);
-
-      currentFilePath.value = newFile.path;
-      documentVersion.value++;
-      fields.clear();
-
-      Get.back(); // ডায়ালগ বন্ধ
-      Get.snackbar("Success", "Applied successfully!", backgroundColor: Colors.green, colorText: Colors.white);
-    } catch (e) {
-      Get.back();
-      Get.snackbar("Error", e.toString(), backgroundColor: Colors.red);
     }
-  }
 
-  Future<void> saveFileLocally() async {
-    try {
-      if (Platform.isAndroid) {
-        if (!await Permission.manageExternalStorage.request().isGranted) {
-          await Permission.storage.request();
-        }
-      }
+    // ৩. সেভ করা
+    final List<int> bytes = await document.save();
+    document.dispose();
 
-      Directory? baseDir;
-      if (Platform.isAndroid) {
-        baseDir = Directory('/storage/emulated/0/Download');
-      } else {
-        baseDir = await getApplicationDocumentsDirectory();
-      }
+    final tempDir = await getTemporaryDirectory();
+    final newFile = File('${tempDir.path}/temp_edited.pdf');
+    await newFile.writeAsBytes(bytes, flush: true);
 
-      final String folderPath = '${baseDir.path}/PDF Editor';
-      final Directory dir = Directory(folderPath);
-      if (!await dir.exists()) await dir.create(recursive: true);
-
-      final String finalPath = '$folderPath/signed_${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      await File(currentFilePath.value).copy(finalPath);
-
-      Get.dialog(
-        AlertDialog(
-          title: const Text("Document Saved"),
-          content: Text("Location: Downloads/PDF Editor\nFile: signed_$fileName"),
-          actions: [
-            TextButton(onPressed: () => Get.close(2), child: const Text("OK")),
-          ],
-        ),
-      );
-    } catch (e) {
-      Get.snackbar("Error", "Save failed: $e", backgroundColor: Colors.red, colorText: Colors.white);
-    }
+    currentFilePath.value = newFile.path;
+    documentVersion.value++;
   }
 
   @override
