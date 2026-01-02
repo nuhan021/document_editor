@@ -9,10 +9,12 @@ class DraggableField {
   double width;
   double height;
   Uint8List? signatureBytes;
+  final int pageIndex; // নতুন যোগ করা হয়েছে
 
   DraggableField({
     required this.id,
     required this.type,
+    required this.pageIndex, // এটি এখন required
     this.dx = 50.0,
     this.dy = 50.0,
     this.width = 120.0,
@@ -29,5 +31,6 @@ class DraggableField {
     'width': width,
     'height': height,
     'data': data,
+    'pageIndex': pageIndex, // জেসন ফরম্যাটেও যোগ করা হলো
   };
 }

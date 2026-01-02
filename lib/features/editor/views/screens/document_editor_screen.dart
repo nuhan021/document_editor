@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:pe/core/utils/logging/logger.dart';
 import 'package:signature/signature.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:pe/features/editor/controller/editor_controller.dart';
@@ -17,104 +19,205 @@ class DocumentEditorScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Document Editor"),
         actions: [
-          IconButton(
-            onPressed: () => controller.saveConfiguration(),
-            icon: const Icon(Icons.save),
-          ),
+          Obx(() {
+            if (controller.hasFilledField) {
+              return ElevatedButton.icon(
+                onPressed: () => controller.applyFieldToDocument(),
+                icon: const Icon(Icons.check, color: Colors.white),
+                label: const Text("APPLY", style: TextStyle(color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                ),
+              );
+            }
+            return TextButton(
+              onPressed: () => _showFinalSaveDialog(context),
+              child: const Text("FINISH", style: TextStyle(color: Colors.blue)),
+            );
+          }),
         ],
       ),
-      body: NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification.metrics.axis == Axis.vertical) {
-            controller.updateScroll(Offset(
-              controller.pdfViewerController.scrollOffset.dx,
-              notification.metrics.pixels,
-            ));
-          }
-          return true;
-        },
-        child: Stack(
-          children: [
-            SfPdfViewer.file(
-              File(controller.filePath),
-              controller: controller.pdfViewerController,
-              onZoomLevelChanged: (details) => controller.updateZoom(details.newZoomLevel),
-            ),
-            Positioned.fill(
-              child: Obx(() {
-                final zoom = controller.zoomLevel.value;
-                final scroll = controller.scrollOffset.value;
+      body: Stack(
+        children: [
+          NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              controller.updateScroll(
+                controller.pdfViewerController.scrollOffset,
+              );
+              return true;
+            },
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // ✅ Dynamic height instead of fixed 411
+                final double maxWidth = constraints.maxWidth;
+                final double maxHeight = constraints.maxHeight;
+
+                // 🔥 KEY FIX: Store actual render dimensions
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  controller.updateLayoutConstraints(maxWidth, maxHeight);
+                });
 
                 return Stack(
-                  children: controller.fields.map((field) {
-                    final left = (field.dx * zoom) - scroll.dx;
-                    final top = (field.dy * zoom) - scroll.dy;
-
-                    return Positioned(
-                      key: ValueKey(field.id),
-                      left: left,
-                      top: top,
-                      child: GestureDetector(
-                        onPanUpdate: (details) {
-                          final newDx = ((left + details.delta.dx) + scroll.dx) / zoom;
-                          final newDy = ((top + details.delta.dy) + scroll.dy) / zoom;
-                          controller.updatePosition(field.id, newDx, newDy);
+                  children: [
+                    // ১. পিডিএফ ভিউয়ার লেয়ার
+                    Obx(() {
+                      return SfPdfViewer.file(
+                        File(controller.currentFilePath.value),
+                        key: ValueKey(controller.documentVersion.value),
+                        controller: controller.pdfViewerController,
+                        pageLayoutMode: PdfPageLayoutMode.single,
+                        onDocumentLoaded: (details) {
+                          // 🔥 Get actual PDF page dimensions when loaded
+                          controller.onDocumentLoaded(details);
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.blue, width: 1),
-                          ),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              GestureDetector(
-                                onTap: () => _handleFieldTap(context, field.type, field.id),
-                                child: _buildFieldContent(field),
-                              ),
-                              Positioned(
-                                top: -12,
-                                right: -12,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                        onZoomLevelChanged: (details) =>
+                            controller.updateZoom(details.newZoomLevel),
+                      );
+                    }),
+
+                    // ২. ড্র্যাগেবল উইজেট লেয়ার
+                    Obx(() {
+                      final zoom = controller.zoomLevel.value;
+                      final activePage =
+                          controller.pdfViewerController.pageNumber - 1;
+
+                      return Stack(
+                        children: controller.fields.map((field) {
+                          if (field.pageIndex != activePage)
+                            return const SizedBox.shrink();
+
+                          final isFilled =
+                              field.data != null || field.signatureBytes != null;
+
+                          return Positioned(
+                            key: ValueKey(field.id),
+                            left: field.dx,
+                            top: field.dy,
+                            child: GestureDetector(
+                              onPanUpdate: (details) {
+                                double newX = field.dx + details.delta.dx;
+                                double newY = field.dy + details.delta.dy;
+
+                                newX = newX.clamp(0.0, maxWidth - 80);
+                                newY = newY.clamp(0.0, maxHeight - 40);
+
+                                controller.updatePosition(field.id, newX, newY);
+                              },
+                              child: Transform.scale(
+                                scale: zoom,
+                                alignment: Alignment.topLeft,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
                                   children: [
-                                    _buildActionButton(
-                                      icon: Icons.edit,
-                                      color: Colors.green,
-                                      onTap: () => _handleFieldTap(context, field.type, field.id),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isFilled
+                                            ? Colors.green.withOpacity(0.2)
+                                            : Colors.red.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                          color: isFilled
+                                              ? Colors.green
+                                              : Colors.red,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: () => _handleFieldTap(
+                                          context,
+                                          field.type,
+                                          field.id,
+                                        ),
+                                        child: _buildFieldContent(field),
+                                      ),
                                     ),
-                                    const SizedBox(width: 4),
-                                    _buildActionButton(
-                                      icon: Icons.close,
-                                      color: Colors.red,
-                                      onTap: () => controller.removeField(field.id),
+                                    Positioned(
+                                      top: -15,
+                                      right: -15,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _buildActionButton(
+                                            icon: Icons.edit,
+                                            color: Colors.blue,
+                                            onTap: () => _handleFieldTap(
+                                              context,
+                                              field.type,
+                                              field.id,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          _buildActionButton(
+                                            icon: Icons.close,
+                                            color: Colors.red,
+                                            onTap: () =>
+                                                controller.removeField(field.id),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                            ),
+                          );
+                        }).toList(),
+                      );
+                    }),
+                  ],
                 );
-              }),
+              },
             ),
-          ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: Obx(
+            () => BottomAppBar(
+          child: controller.canAddNewField
+              ? Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildToolButton('signature', Icons.edit),
+              _buildToolButton('text', Icons.text_fields),
+              _buildToolButton('date', Icons.calendar_today),
+            ],
+          )
+              : Container(
+            padding: const EdgeInsets.all(16),
+            child: const Text(
+              "Fill the current field and click APPLY to add more",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ),
       ),
-      bottomNavigationBar: BottomAppBar(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildToolButton('signature', Icons.edit),
-            _buildToolButton('text', Icons.text_fields),
-            _buildToolButton('date', Icons.calendar_today),
-          ],
-        ),
+    );
+  }
+
+  void _showFinalSaveDialog(BuildContext context) {
+    Get.dialog(
+      AlertDialog(
+        title: const Text("Save Document"),
+        content: const Text("Save the final document to your device?"),
+        actions: [
+          TextButton(onPressed: () => Get.back(), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () {
+              Get.back();
+              Get.find<EditorController>().saveFileLocally();
+            },
+            child: const Text("Save"),
+          ),
+        ],
       ),
     );
   }
@@ -127,13 +230,13 @@ class DocumentEditorScreen extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(2),
+        padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           color: color,
           shape: BoxShape.circle,
           boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
         ),
-        child: Icon(icon, color: Colors.white, size: 20),
+        child: Icon(icon, color: Colors.white, size: 18),
       ),
     );
   }
@@ -142,14 +245,14 @@ class DocumentEditorScreen extends StatelessWidget {
     if (field.type == 'signature' && field.signatureBytes != null) {
       return Image.memory(
         field.signatureBytes!,
-        width: 80,
-        height: 40,
+        width: 100,
+        height: 50,
         fit: BoxFit.contain,
       );
     }
     return Text(
       field.data ?? field.type.toUpperCase(),
-      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
     );
   }
 
@@ -191,7 +294,10 @@ class DocumentEditorScreen extends StatelessWidget {
                 children: [
                   TextButton(
                     onPressed: () => controller.sigController.clear(),
-                    child: const Text("Clear", style: TextStyle(color: Colors.red)),
+                    child: const Text(
+                      "Clear",
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
                   ElevatedButton(
                     onPressed: () {
@@ -210,6 +316,7 @@ class DocumentEditorScreen extends StatelessWidget {
   }
 
   void _showTextInput(EditorController controller, String fieldId) {
+    final textController = TextEditingController();
     Get.bottomSheet(
       Container(
         color: Colors.white,
@@ -218,20 +325,44 @@ class DocumentEditorScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              decoration: const InputDecoration(labelText: "Enter Text"),
-              onSubmitted: (val) {
-                controller.updateFieldData(fieldId, val);
-                Get.back();
-              },
+              controller: textController,
+              decoration: const InputDecoration(
+                labelText: "Enter Text",
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
             ),
             const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Get.back(),
+                  child: const Text("Cancel"),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: () {
+                    if (textController.text.isNotEmpty) {
+                      controller.updateFieldData(fieldId, textController.text);
+                      Get.back();
+                    }
+                  },
+                  child: const Text("Save"),
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  void _showDatePicker(BuildContext context, EditorController controller, String fieldId) async {
+  void _showDatePicker(
+    BuildContext context,
+    EditorController controller,
+    String fieldId,
+  ) async {
     DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
@@ -239,7 +370,10 @@ class DocumentEditorScreen extends StatelessWidget {
       lastDate: DateTime(2100),
     );
     if (picked != null) {
-      controller.updateFieldData(fieldId, picked.toIso8601String().split('T')[0]);
+      controller.updateFieldData(
+        fieldId,
+        picked.toIso8601String().split('T')[0],
+      );
     }
   }
 
