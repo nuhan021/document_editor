@@ -1,4 +1,4 @@
-import 'dart:convert'; // Base64 ডিকোড করার জন্য এটি প্রয়োজন
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -23,7 +23,6 @@ class DraggableSignatureField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // চেক করুন সিগনেচার ডাটা কি খালি স্ট্রিং নাকি রিয়েল ডাটা
     final String signatureData = field['signature'] ?? '';
     final bool hasSignature = signatureData.isNotEmpty;
 
@@ -47,7 +46,7 @@ class DraggableSignatureField extends StatelessWidget {
               child: !hasSignature
                   ? const Center(child: Text("Tap to Sign", style: TextStyle(fontSize: 12, color: Colors.grey)))
                   : Image.memory(
-                base64Decode(signatureData), // স্ট্রিং থেকে বাইটস-এ রূপান্তর
+                base64Decode(signatureData),
                 fit: BoxFit.contain,
               ),
             ),

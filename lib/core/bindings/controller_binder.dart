@@ -8,6 +8,7 @@ import 'package:pe/features/home/controller/upload_controller.dart';
 import 'package:pe/features/home/service/file_service.dart';
 
 import '../../features/editor/controller/editor_controller.dart';
+import '../../features/editor/service/document_service.dart';
 
 class ControllerBinder extends Bindings {
   @override
@@ -39,6 +40,11 @@ class ControllerBinder extends Bindings {
 
     Get.lazyPut<EditorController>(
           () => EditorController(),
+      fenix: true,
+    );
+
+    Get.lazyPut<DocumentService>(
+          () => DocumentService(),
       fenix: true,
     );
 

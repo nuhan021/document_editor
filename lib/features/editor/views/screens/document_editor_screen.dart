@@ -22,9 +22,47 @@ class DocumentEditorScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Edit'),
-        centerTitle: false,
         actions: [
+          IconButton(
+            onPressed: () {
+              final TextEditingController linkController = TextEditingController();
+
+              Get.defaultDialog(
+                title: "Import Configuration",
+                titleStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                content: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: TextField(
+                    controller: linkController,
+                    decoration: InputDecoration(
+                      hintText: "Paste your pe-app://config/ID link here",
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.link),
+                    ),
+                  ),
+                ),
+                confirm: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                  onPressed: () {
+                    String link = linkController.text.trim();
+                    if (link.isNotEmpty) {
+                      controller.importFromLink(link);
+                      Get.back();
+                    } else {
+                      Get.snackbar("Error", "Please paste a link first",
+                          snackPosition: SnackPosition.BOTTOM);
+                    }
+                  },
+                  child: const Text("Import", style: TextStyle(color: Colors.white)),
+                ),
+                cancel: TextButton(
+                  onPressed: () => Get.back(),
+                  child: const Text("Cancel"),
+                ),
+              );
+            },
+            icon: const Icon(Icons.link),
+          ),
           IconButton(
             onPressed: () {
               controller.addTextBox();
@@ -55,9 +93,16 @@ class DocumentEditorScreen extends StatelessWidget {
 
           IconButton(
             onPressed: () {
-              AppLoggerHelper.info(controller.exportFieldsToJson().toString());
+              controller.onPublishPressed();
             },
             icon: Icon(Icons.import_export_outlined),
+          ),
+
+          IconButton(
+            onPressed: () {
+              controller.saveAndDownloadFile();
+            },
+            icon: Icon(Icons.arrow_downward),
           ),
         ],
       ),
